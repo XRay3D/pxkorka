@@ -13,11 +13,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ENABLE_TESTS "Build tests" ON)
 option(ENABLE_BENCHMARKS "Build benchmarks" OFF)
 
-# Enable all warnings
+# Strict warning flags for project targets only (not third-party dependencies)
 if (MSVC)
-    add_compile_options(/W4 /WX /permissive-)
+    set(PROJECT_WARNING_FLAGS /W4 /WX /permissive-)
 else ()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wshadow -Wunused)
+    set(PROJECT_WARNING_FLAGS -Wall -Wextra -Wpedantic -Werror -Wshadow -Wunused)
 endif ()
 
 # Dependencies
@@ -58,6 +58,8 @@ add_library(korka_lib
         include/korka/compiler/compiler.hpp
 )
 
+target_compile_options(korka_lib PRIVATE ${PROJECT_WARNING_FLAGS})
+
 target_include_directories(korka_lib
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -69,6 +71,7 @@ target_include_directories(korka_lib
 
 add_executable(pxkorka main.cpp)
 target_link_libraries(pxkorka PRIVATE korka_lib)
+target_compile_options(pxkorka PRIVATE ${PROJECT_WARNING_FLAGS})
 
 # --- TESTS ---
 if (ENABLE_TESTS)
@@ -85,6 +88,8 @@ if (ENABLE_TESTS)
             korka_lib
             Catch2WithMain
     )
+
+    target_compile_options(pxkorka_tests PRIVATE ${PROJECT_WARNING_FLAGS})
 
     catch_discover_tests(pxkorka_tests)
 endif ()
