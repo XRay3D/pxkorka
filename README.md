@@ -4,6 +4,8 @@
 
 A Virtual Machine where lexing and compilation happen entirely at **compile-time**.
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge/github/PyXiion/pxkorka)](https://codspeed.io/PyXiion/pxkorka?utm_source=badge)
+
 ---
 
 ### What is this

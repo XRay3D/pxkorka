@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # --- OPTIONS ---
 option(ENABLE_TESTS "Build tests" ON)
+option(ENABLE_BENCHMARKS "Build benchmarks" OFF)
 
 # Enable all warnings
 if (MSVC)
@@ -27,6 +28,19 @@ if (ENABLE_TESTS)
     list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
     include(Catch)
 
+endif ()
+
+if (ENABLE_BENCHMARKS)
+    set(BENCHMARK_DOWNLOAD_DEPENDENCIES ON)
+
+    include(FetchContent)
+    FetchContent_Declare(
+            google_benchmark
+            GIT_REPOSITORY https://github.com/CodSpeedHQ/codspeed-cpp
+            SOURCE_SUBDIR google_benchmark
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(google_benchmark)
 endif ()
 
 add_library(korka_lib
@@ -73,4 +87,19 @@ if (ENABLE_TESTS)
     )
 
     catch_discover_tests(pxkorka_tests)
+endif ()
+
+# --- BENCHMARKS ---
+if (ENABLE_BENCHMARKS)
+    add_executable(pxkorka_benchmarks
+            bench/lexer_bench.cpp
+            bench/parser_bench.cpp
+            bench/bytecode_builder_bench.cpp
+    )
+
+    target_link_libraries(pxkorka_benchmarks
+            PRIVATE
+            korka_lib
+            benchmark::benchmark
+    )
 endif ()
