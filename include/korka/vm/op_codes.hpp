@@ -1,25 +1,24 @@
 #pragma once
 
+#include <cstdint>
+#include "korka/shared/types.hpp"
+
 namespace korka::vm {
   enum class op_code {
-    load_imm, // rX = imm
-    load_arg, // rX = arg[i]
+    // Pushes a value onto the stack
+    i64_const, // <op><i64>
 
-    add,   // rC = rA + rB
-    sub,   // rC = rA - rB
-    mul,   // rC = rA * rB
-    div,   // rC = rA / rB
-
-    cmp_eq, // rC = rA == rB
-    cmp_lt, // rC = rA < rB
-    cmp_gt, // rC = rA > rB
-
-    jmp,    // pc += offset
-    jmp_if, // if (rX) pc += offset
-
-    call,
     ret
   };
+
+  template<korka::type Type>
+  constexpr op_code get_const_op_by_type() {
+    if constexpr (Type == korka::type::i64) {
+      return op_code::i64_const;
+    } else {
+      static_assert(false, "Unknown type");
+    }
+  }
 
   constexpr int op_code_size = 1;
 }

@@ -13,7 +13,7 @@
 #include "lex_token.hpp"
 #include "korka/shared.hpp"
 #include "korka/utils/utils.hpp"
-#include "error.hpp"
+#include "korka/shared/error.hpp"
 
 namespace korka {
   class lexer {

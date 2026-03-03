@@ -8,10 +8,10 @@
 #include <cstdint>
 #include <string_view>
 #include <vector>
+#include <ranges>
 
 namespace korka {
-  class parser {
-  public:
+  namespace nodes {
     using index_t = int32_t;
     constexpr static index_t empty_node = -1;
 
@@ -39,6 +39,48 @@ namespace korka {
       data_t data;
       index_t next = empty_node;
     };
+
+
+    struct index_iterator {
+      using value_type = index_t;
+      using difference_type = std::ptrdiff_t;
+
+      index_t current;
+      std::span<const node> nodes;
+
+      auto operator*() const -> index_t { return current; }
+      auto operator++() -> index_iterator& {
+        current = nodes[current].next;
+        return *this;
+      }
+      auto operator++(int) -> index_iterator {
+        auto self = *this;
+        current = nodes[current].next;
+        return self;
+      }
+      auto operator==(std::default_sentinel_t) const -> bool {
+        return current == empty_node;
+      }
+    };
+
+    auto get_list_view(std::span<const node> nodes, index_t head) {
+
+      return std::ranges::subrange(
+        index_iterator{head, nodes},
+        std::default_sentinel
+      );
+    }
+  }
+  using namespace korka::nodes;
+
+  template<class T>
+  concept parser_mixin = requires (T &mixin) {
+    { mixin.on_function(std::declval<decl_function>()) };
+  };
+
+  template<parser_mixin ...mixins>
+  class parser {
+  public:
 
     struct ast_pool {
       std::vector<node> nodes{};

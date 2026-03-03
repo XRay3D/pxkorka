@@ -1,7 +1,7 @@
 #pragma once
 
 #include <variant>
-#include "lex_token.hpp"
+#include "korka/compiler/lex_token.hpp"
 #include "korka/utils/const_format.hpp"
 #include <optional>
 
@@ -46,12 +46,54 @@ namespace korka {
       }
       return korka::format("Parser Error: ~:~", err.message, err.ctx.lexeme->char_pos);
     }
+
+    struct redeclaration {
+      std::string_view identifier;
+    };
+    constexpr auto report(const redeclaration &err) -> std::string {
+      return korka::format("Compiler Error: ~ was redeclared", err.identifier);
+    }
+
+    struct unknown_type {
+      std::string_view identifier;
+    };
+    constexpr auto report(const unknown_type &err) -> std::string {
+      return korka::format("Compiler Error: unknown type `~`", err.identifier);
+    }
+
+    struct undefined_symbol {
+      std::string_view identifier;
+    };
+    constexpr auto report(const undefined_symbol &err) -> std::string {
+      return korka::format("Compiler Error: symbol `~` not defined", err.identifier);
+    }
+
+    struct function_return_type_mismatch {
+      std::string_view return_type;
+      std::string_view actual_type;
+    };
+    constexpr auto report(const function_return_type_mismatch &err) -> std::string {
+      return korka::format("Compiler Error: expected ~ type to be returned, got ~", err.return_type, err.actual_type);
+    }
+
+
+    struct other_compiler_error {
+      std::string_view message;
+    };
+
+    constexpr auto report(const other_compiler_error &err) -> std::string {
+      return korka::format("Compiler Error: ~", err.message);
+    }
   }
 
   using error_t = std::variant<
     error::unexpected_character,
     error::other_lexer_error,
-    error::other_parser_error>;
+    error::other_parser_error,
+    error::redeclaration,
+    error::undefined_symbol,
+    error::unknown_type,
+    error::other_compiler_error>;
 
   constexpr auto to_string(const error_t &err) -> std::string {
     return std::visit([](const auto &e) {
