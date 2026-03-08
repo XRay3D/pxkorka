@@ -8,7 +8,7 @@ namespace korka {
   template<auto data_getter>
   constexpr auto to_array() {
     using value_type = typename decltype(data_getter())::value_type;
-    constexpr static std::size_t size = data_getter().size();
+    constexpr std::size_t size = data_getter().size();
 
     std::array<value_type, size> out;
     auto in = data_getter();

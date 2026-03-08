@@ -50,6 +50,7 @@ namespace korka {
     struct redeclaration {
       std::string_view identifier;
     };
+
     constexpr auto report(const redeclaration &err) -> std::string {
       return korka::format("Compiler Error: ~ was redeclared", err.identifier);
     }
@@ -57,6 +58,7 @@ namespace korka {
     struct unknown_type {
       std::string_view identifier;
     };
+
     constexpr auto report(const unknown_type &err) -> std::string {
       return korka::format("Compiler Error: unknown type `~`", err.identifier);
     }
@@ -64,6 +66,7 @@ namespace korka {
     struct undefined_symbol {
       std::string_view identifier;
     };
+
     constexpr auto report(const undefined_symbol &err) -> std::string {
       return korka::format("Compiler Error: symbol `~` not defined", err.identifier);
     }
@@ -72,6 +75,7 @@ namespace korka {
       std::string_view return_type;
       std::string_view actual_type;
     };
+
     constexpr auto report(const function_return_type_mismatch &err) -> std::string {
       return korka::format("Compiler Error: expected ~ type to be returned, got ~", err.return_type, err.actual_type);
     }
@@ -110,8 +114,18 @@ namespace korka {
     }, err);
   }
 
+  template<const_string Msg>
+  struct ErrorMessage {
+    static_assert(false, "Check the template parameter for details");
+  };
+
   template<auto err_getter>
   consteval auto report_error() -> void {
+    #if __cpp_static_assert >= 202306L
     static_assert(false, to_string(err_getter()));
+    #else
+    constexpr auto msg = const_string_from_string_view<[]{return to_string(err_getter());}>();
+    std::ignore = ErrorMessage<msg>{};
+    #endif
   }
 }
