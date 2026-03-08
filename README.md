@@ -20,8 +20,36 @@ program even starts.
 |      Lexer       |  Done   |     constexpr     |
 | Bytecode builder |  Done   |     constexpr     |
 |      Parser      |  Done   |     constexpr     |
-|     Compiler     |   WIP   |     constexpr     |
-|    VM runner     | Planned |      runtime      |
+|     Compiler     |   Partially done   |     constexpr     |
+|    VM runner     | WIP |      runtime      |
+
+What's done:
+```cpp
+constexpr char code[] = R"(
+int main() {
+  int a = 2;
+  if (a) {
+    return a;
+  } else {
+    return 5 + a;
+  }
+}
+
+int foo(int a, int b) {
+  return a + b;
+}
+)";
+
+constexpr auto compile_result = korka::compile<code>();
+
+// Extracting function types from code
+// It returns a pointer, bc you can't return a type ._.
+auto main_func = compile_result.function<"main">();
+static_assert(std::is_same_v<decltype(main_func), long (*)()>);
+
+auto foo_func = compile_result.function<"foo">();
+static_assert(std::is_same_v<decltype(foo_func), long (*)(long, long)>);
+```
 
 
 ## Example context
