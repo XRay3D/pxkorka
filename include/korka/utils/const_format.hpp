@@ -9,6 +9,32 @@
 
 namespace korka {
   namespace detail {
+//    // Custom std::to_chars, since it's not constexpr in C++ 20
+//    template<typename T>
+//    constexpr auto internal_to_chars(char* first, char* last, T value) -> char* {
+//      if (value == 0) {
+//        *first = '0';
+//        return first + 1;
+//      }
+//
+//      if constexpr (std::is_signed_v<T>) {
+//        if (value < 0) {
+//          *first++ = '-';
+//          // Handle potential overflow for minimum values
+//          unsigned long long v = static_cast<unsigned long long>(-(value + 1)) + 1;
+//          return internal_to_chars(first, last, v);
+//        }
+//      }
+//
+//      char* start = first;
+//      while (value > 0) {
+//        *first++ = static_cast<char>('0' + (value % 10));
+//        value /= 10;
+//      }
+//      std::reverse(start, first);
+//      return first;
+//    }
+
     constexpr auto to_string_helper(const auto &value) -> std::string {
       using T = std::decay_t<decltype(value)>;
 
@@ -18,8 +44,8 @@ namespace korka {
         return std::string(1, value);
       } else if constexpr (requires { std::to_chars(std::declval<char *>(), std::declval<char *>(), value); }) {
         std::array<char, 64> buffer{};
-        auto [ptr, ec] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-        return std::string(buffer.data(), ptr);
+        auto [end, _] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+        return std::string(buffer.data(), end );
       } else {
         return "?";
       }

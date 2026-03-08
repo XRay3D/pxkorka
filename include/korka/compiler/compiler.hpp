@@ -484,7 +484,8 @@ struct unique_type{};
     };
 
     if constexpr (not expected()) {
-      report_error<[]{return expected.error();}>();
+      report_error<[]{return expected().error();}>();
+      return expected().error();
     } else {
       return compilation_result_to_const<[] constexpr { return expected().value(); }>();
     }
