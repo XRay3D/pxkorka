@@ -18,8 +18,6 @@ constexpr auto compile_result = korka::compile<code>();
 
 int main() {
   korka::vm::context ctx{compile_result.bytes};
-  std::println("{:n:X}", compile_result.bytes | std::views::transform([](auto b) { return static_cast<int>(b); }));
-
 //  auto main_func = compile_result.function<"main">();
   auto fib_func = compile_result.function<"fib">();
 

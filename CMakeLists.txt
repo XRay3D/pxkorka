@@ -62,6 +62,9 @@ target_include_directories(korka_lib
 add_executable(pxkorka main.cpp)
 target_link_libraries(pxkorka PRIVATE korka_lib)
 
+# Ignore unused-but-set-variable shadow
+target_compile_options(korka_lib PUBLIC -Wno-error=unused-but-set-variable -Wno-error=shadow)
+
 # --- TESTS ---
 #if (ENABLE_TESTS)
 #    enable_testing()
