@@ -5,17 +5,11 @@
 #include <print>
 
 constexpr char code[] = R"(
-int main() {
-  int a = 2;
-  if (a) {
-    return a * 5;
-  } else {
-    return 5 + a;
-  }
-}
+int fib(int n) {
+  if (n == 0) return 0;
+  if (n == 1) return 1;
 
-int foo(int a, int b) {
-  return a + b;
+  return fib(n-1) + fib(n-2);
 }
 )";
 
@@ -24,11 +18,12 @@ constexpr auto compile_result = korka::compile<code>();
 
 int main() {
   korka::vm::context ctx{compile_result.bytes};
+  std::println("{:n:X}", compile_result.bytes | std::views::transform([](auto b) { return static_cast<int>(b); }));
 
-  auto main_func = compile_result.function<"main">();
-  auto foo_func = compile_result.function<"foo">();
+//  auto main_func = compile_result.function<"main">();
+  auto fib_func = compile_result.function<"fib">();
 
-  std::println("{} {}", ctx.run(main_func), ctx.run(foo_func, 3L, 42L));
+  std::println("{}", ctx.call(fib_func, 12L));
 
 //  std::ignore = tokens;
 //  std::println("{:n:02X}", compile_result.bytes | std::views::transform([](auto b) { return static_cast<int>(b); }));

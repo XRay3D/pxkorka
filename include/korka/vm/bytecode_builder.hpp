@@ -66,6 +66,10 @@ namespace korka::vm {
     constexpr auto emit_jmp_if_zero(const label &target) {
       record_jump(op_code::jmpz, target);
     }
+    constexpr auto emit_call(const address_t &address) {
+      emit_op(op_code::call);
+      m_data.write_many(address);
+    }
 //
 //    constexpr auto emit_jmp_if(const label &target, reg_id_t cond) {
 //      record_jump(op_code::jmp_if, target, cond);
