@@ -46,6 +46,8 @@ add_library(korka_lib
         include/korka/shared/types.hpp
         include/korka/shared/flat_map.hpp
         include/korka/utils/frozen_hash_string_view.hpp
+        include/korka/utils/byte_reader.hpp
+        include/korka/utils/function_traits.hpp
 )
 
 target_include_directories(korka_lib
@@ -59,6 +61,9 @@ target_include_directories(korka_lib
 
 add_executable(pxkorka main.cpp)
 target_link_libraries(pxkorka PRIVATE korka_lib)
+
+# Ignore unused-but-set-variable shadow
+target_compile_options(korka_lib PUBLIC -Wno-error=unused-but-set-variable -Wno-error=shadow)
 
 # --- TESTS ---
 #if (ENABLE_TESTS)

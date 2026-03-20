@@ -1,15 +1,21 @@
 #pragma once
 
+#include <variant>
+#include <string_view>
+#include <expected>
 #include <cstdint>
+#include "korka/shared/error.hpp"
 #include "korka/shared/types.hpp"
+#include "korka/utils/overloaded.hpp"
 
 namespace korka::vm {
   using local_index_t = std::uint8_t;
   using jump_offset = std::int32_t;
+  using address_t = std::uint32_t;
 
-  enum class op_code {
+  enum class op_code : char {
     // --- Memory & Stack ---
-    // Loads a value from tje local at index on stack
+    // Loads a value from the local at index on stack
     // <op><local_index_t>
     lload,
 
@@ -36,13 +42,24 @@ namespace korka::vm {
     i64_mul,
     i64_div,
 
+    // push(pop() == pop())
+    i64_cmp,
+
     // --- Control flow ---
     // - Jumps -
-    // // <op><jump_address>
+    // // <op><jump_offset>
     jmp, // jumps no matter what
     jmpz, // pops value and jumps if it's zero
 
     // - Other -
+    // Call
+    // foo(a, b, c)
+    // On stack:  arg_count <- top
+    //            A <- arguments
+    //            B
+    //            C
+    // Then VM on call puts them into locals
+    call, // <op><address_t>
     ret
   };
 
@@ -58,7 +75,7 @@ namespace korka::vm {
   using type_info = std::variant<korka::type>;
 
   constexpr auto
-  get_op_code_for_math(type_info ltype, type_info rtype, std::string_view op) -> std::expected<op_code, error_t> {
+  get_op_code_for_math(const type_info &ltype, const type_info &rtype, std::string_view op) -> std::expected<op_code, error_t> {
     if (ltype != rtype) {
       return std::unexpected{error::other_error{
         .message = "Math operations between distinct types are not supported yet"
@@ -76,8 +93,9 @@ namespace korka::vm {
             return op_code::i64_mul;
           if (op == "/")
             return op_code::i64_div;
-          return std::unexpected{error::other_error{
-            .message = "Unsupported math operation for i64"
+          return std::unexpected{error::unsupported_math_op{
+            .type = "i64",
+            .op = op
           }};
         }
         return std::unexpected{error::other_error{

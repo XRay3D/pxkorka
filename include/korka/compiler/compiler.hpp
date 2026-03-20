@@ -1,6 +1,6 @@
 #pragma once
 
-#include "frozen/bits/elsa.h"
+#include <frozen/bits/elsa.h>
 #include "korka/shared/error.hpp"
 #include "korka/shared/flat_map.hpp"
 #include "korka/utils/overloaded.hpp"
@@ -55,7 +55,7 @@ namespace korka {
     std::vector<variable_info> params;
     type_info return_type;
 
-    vm::bytecode_builder::label label;
+    std::size_t start_pos;
   };
 
   template<std::size_t NMaxParams>
@@ -65,7 +65,7 @@ namespace korka {
     std::array<variable_info, NMaxParams> params;
     type_info return_type;
 
-    vm::bytecode_builder::label label;
+    std::size_t start_pos;
   };
 
   template<auto info_getter>
@@ -76,8 +76,8 @@ namespace korka {
     template<std::size_t... Is>
     struct param_helper<std::index_sequence<Is...>> {
       // Map each parameter info to its corresponding C++ type
-      using type = vm::type_info_to_cpp_t<[]{return info_getter().return_type;}>(
-        vm::type_info_to_cpp_t<[]{return info_getter().params[Is].type;}>...
+      using type = vm::type_info_to_cpp_t<[] { return info_getter().return_type; }>(
+        vm::type_info_to_cpp_t<[] { return info_getter().params[Is].type; }>...
       );
     };
 
@@ -96,7 +96,7 @@ namespace korka {
       .param_count = f.params.size(),
       .params{},
       .return_type = f.return_type,
-      .label{}
+      .start_pos = f.start_pos
     };
 
     std::ranges::copy(f.params, std::begin(info.params));
@@ -175,6 +175,18 @@ namespace korka {
     flat_map<std::string_view, function_info> functions;
   };
 
+
+  struct function_runtime_info {
+    std::size_t start_pos;
+  };
+
+  template<class Signature>
+  struct function_runtime_info_with_signature : public function_runtime_info {
+    using signature_t = Signature;
+
+    using function_runtime_info::start_pos;
+  };
+
   template<std::size_t NBytes, std::size_t NFunctions, std::size_t NMaxParams, class SignatureMapper>
   struct const_compilation_result {
     std::array<std::byte, NBytes> bytes;
@@ -184,34 +196,67 @@ namespace korka {
     using get_signature_t = typename SignatureMapper::template get_signature_t<name>;
 
     template<const_string name>
-    constexpr auto function() const -> get_signature_t<name> * {
-      return nullptr;
+    constexpr auto function() const {
+      return function_runtime_info_with_signature<get_signature_t<name>>{
+        functions.at(name).start_pos
+      };
     }
 
-    SignatureMapper mapper{};
+//    SignatureMapper mapper{};
   };
 
-template<std::size_t>
-struct unique_type{};
+  template<auto>
+  struct unique_type {
+  };
 
   template<auto function_info_getter, typename IndexSequence>
   struct signature_mapper;
 
   template<auto function_info_getter, std::size_t... Is>
   struct signature_mapper<function_info_getter, std::index_sequence<Is...>> {
+    consteval static auto hash(auto &&v) -> std::size_t {
+      return frozen::elsa<std::string_view>{}(v, 0);
+    }
+
+    // That's how we basically map types to strings
+    // Function name -> hash -> unique_type<hash>
+    // And then we create a functor with overloading for different types
+    // Basically it looks like this:
+    //  overloaded{
+    //    [](unique_type<hash("NAME1")>) -> TYPE1* { return nullptr; },
+    //    [](unique_type<hash("NAME2")>) -> TYPE2* { return nullptr; },
+    //    ...
+    //  }
+
+    // I think I could return here some meta info for internal types later, idk
+
     constexpr static auto _overloaded = overloaded{
-      ([](unique_type<frozen::elsa<std::string_view>{}(function_info_getter(Is).name, 0)>)
-        -> const_function_info_to_signature_t<[] {return function_info_getter(Is);}> *
-      {
+      ([](unique_type<hash(function_info_getter(Is).name)>)
+        -> const_function_info_to_signature_t<[] { return function_info_getter(Is); }> * {
         return nullptr;
       })...
     };
 
+    // Retrieve the type
     template<const_string name>
-    using get_signature_t = std::remove_pointer_t<decltype(_overloaded(unique_type<frozen::elsa<std::string_view>{}(name, 0)>{}))>;
+      #ifdef __clang__ // GCC crashes on this check for some reason
+    requires ([] -> bool {
+      constexpr bool found = requires {
+        { _overloaded(unique_type<hash(name)>{}) };
+      };
+      if constexpr (not found) {
+        report_error<[] {
+          return format("Symbol '~' not found", name);
+        }>();
+      }
+      return true;
+    }())
+      #endif
+    using get_signature_t = std::remove_pointer_t<decltype(_overloaded(
+      unique_type<hash(name)>{}))>;
 
-    std::tuple<const_function_info_to_signature_t<[] {return function_info_getter(Is);}> *...> debug1;
-    std::tuple<unique_type<frozen::elsa<std::string_view>{}(function_info_getter(Is).name, 0)>...> debug2;
+//    std::tuple<const_function_info_to_signature_t<[] { return function_info_getter(Is); }> *...> debug1;
+//    std::tuple<unique_type<frozen::elsa<std::string_view>{}(function_info_getter(Is).name, 0)>...> debug2;
   };
 
 
@@ -240,7 +285,10 @@ struct unique_type{};
       return frozen::make_unordered_map(functions_data);
     };
 
-    using sign_mapper = signature_mapper<[](std::size_t i) { return (functions().begin() + i)->second; }, std::make_index_sequence<function_count>>;
+    // Function mapper
+    using sign_mapper = signature_mapper<[](std::size_t i) {
+      return (functions().begin() + i)->second;
+    }, std::make_index_sequence<function_count>>;
 
     return const_compilation_result<bytes.size(), function_count, max_params_n, sign_mapper>{
       bytes,
@@ -275,13 +323,13 @@ struct unique_type{};
 
     using result_t = std::expected<type_info, error_t>;
 
-    constexpr auto process_node(nodes::index_t idx) -> result_t {
+    constexpr auto process_node(nodes::index_t idx, bool emit = true) -> result_t {
       const auto &node = m_nodes[idx];
 
       return std::visit(overloaded{
         [&](const nodes::decl_program &program) -> result_t {
           for (auto item: nodes::get_list_view(m_nodes, program.external_declarations_head)) {
-            auto ok = process_node(item);
+            auto ok = process_node(item, emit);
             if (not ok) {
               return std::unexpected{ok.error()};
             }
@@ -309,18 +357,22 @@ struct unique_type{};
 
           // Register the function globally BEFORE processing the body
           // This allows the function to "see" itself (recursion)
+
+          builder.bind_label(label);
+          auto func_start_pos = builder.resolve_label(label);
+          if (not func_start_pos) return std::unexpected{error::other_compiler_error{"Idk"}};
+
           auto reg_ok = m_symbols.declare_function(
             function.name,
             parameters,
             ret_type,
-            label
+            *func_start_pos
           );
           if (not reg_ok) return std::unexpected{reg_ok.error()};
 
           // Entering function scope
           m_symbols.push_scope();
           m_current_func_ret = ret_type;
-          builder.bind_label(label);
 
           // Handle parameters as local variables
           for (auto &&param: parameters) {
@@ -332,7 +384,7 @@ struct unique_type{};
 
           // Function body
           for (auto stmt: nodes::get_list_view(m_nodes, function.body)) {
-            if (auto res = process_node(stmt); !res) {
+            if (auto res = process_node(stmt, emit); !res) {
               m_symbols.pop_scope(); // clean up
               return res;
             }
@@ -349,7 +401,9 @@ struct unique_type{};
           return std::visit([&](auto val) -> result_t {
             using T = decltype(val);
             if constexpr (std::is_same_v<T, std::int64_t>) {
-              builder.emit_const<type::i64>(val);
+              if (emit) {
+                builder.emit_const<type::i64>(val);
+              }
               return type_info{type::i64};
             }
             return std::unexpected{
@@ -358,13 +412,13 @@ struct unique_type{};
         },
         [&](const nodes::stmt_block &block) -> result_t {
           for (auto stmt: nodes::get_list_view(m_nodes, block.children_head)) {
-            if (auto res = process_node(stmt); !res) return res;
+            if (auto res = process_node(stmt, emit); !res) return res;
           }
           return {};
         },
 
         [&](const nodes::stmt_return &stmt) -> result_t {
-          auto actual_type = process_node(stmt.expr);
+          auto actual_type = process_node(stmt.expr, emit);
           if (!actual_type) return actual_type;
 
           // Semantic Check: Does return type match function signature?
@@ -374,8 +428,9 @@ struct unique_type{};
               .message = "Function return type mismatch"
             }};
           }
-
-          builder.emit_op(vm::op_code::ret);
+          if (emit) {
+            builder.emit_op(vm::op_code::ret);
+          }
           return *actual_type;
         },
         [&](const nodes::decl_var &var) -> result_t {
@@ -385,11 +440,13 @@ struct unique_type{};
           }
 
           if (var.init_expr != nodes::empty_node) {
-            auto expr = process_node(var.init_expr);
+            auto expr = process_node(var.init_expr, emit);
             if (not expr) {
               return expr;
             }
-            builder.emit_save_local(ok->locals_index);
+            if (emit) {
+              builder.emit_save_local(ok->locals_index);
+            }
           }
           return ok->type;
         },
@@ -402,15 +459,17 @@ struct unique_type{};
             }};
           }
 
-          builder.emit_load_local(info->locals_index);
+          if (emit) {
+            builder.emit_load_local(info->locals_index);
+          }
           return info->type;
         },
         [&](const nodes::expr_binary &expr) -> result_t {
-          auto left = process_node(expr.left);
+          auto left = process_node(expr.left, emit);
           if (not left) {
             return left;
           }
-          auto right = process_node(expr.right);
+          auto right = process_node(expr.right, emit);
           if (not right) {
             return right;
           }
@@ -421,17 +480,46 @@ struct unique_type{};
             }};
           }
 
-          auto code = vm::get_op_code_for_math(*left, *right, expr.op);
-          if (not code) {
-            return std::unexpected{code.error()};
+          using namespace std::literals;
+          constexpr std::array comparison_ops = {
+            "=="sv
+          };
+
+
+          if (emit) {
+            if (std::ranges::contains(comparison_ops, expr.op)) {
+              if (auto *type = std::get_if<korka::type>(&*left)) {
+                switch (*type) {
+                  case type::void_:
+                    return std::unexpected{error::other_compiler_error{"wtf"}};
+                  case type::i64: {
+                    auto &op = expr.op;
+                    if (op == "==") {
+                      builder.emit_op(vm::op_code::i64_cmp);
+                    } else {
+                      return std::unexpected{error::other_compiler_error{"Unsupported operation"}};
+                    }
+                    break;
+                  }
+                }
+              } else {
+                return std::unexpected{error::other_compiler_error{"Unsupported type"}};
+              }
+            } else {
+              // Basic math
+              auto code = vm::get_op_code_for_math(*left, *right, expr.op);
+              if (not code) {
+                return std::unexpected{code.error()};
+              }
+              builder.emit_op(*code);
+            }
           }
-          builder.emit_op(*code);
 
           return *left;
         },
 
         [&](const nodes::stmt_if &if_) -> result_t {
-          auto condition_expr = process_node(if_.condition);
+          auto condition_expr = process_node(if_.condition, emit);
           if (not condition_expr) {
             return condition_expr;
           }
@@ -442,14 +530,14 @@ struct unique_type{};
           if (if_.else_branch == nodes::empty_node) {
             builder.emit_jmp_if_zero(end_label);
 
-            auto then_branch = process_node(if_.then_branch);
+            auto then_branch = process_node(if_.then_branch, emit);
             if (not then_branch) {
               return then_branch;
             }
           } else {
             builder.emit_jmp_if_zero(else_branch_label);
 
-            auto then_branch = process_node(if_.then_branch);
+            auto then_branch = process_node(if_.then_branch, emit);
             if (not then_branch) {
               return then_branch;
             }
@@ -465,6 +553,41 @@ struct unique_type{};
 
           builder.bind_label(end_label);
           return {};
+        },
+        [&](nodes::expr_call const &call) -> result_t {
+          auto func = m_symbols.lookup_function(call.name);
+          if (!func) {
+            return std::unexpected{error::undefined_symbol{.identifier = call.name}};
+          }
+
+          auto &expected_params = func->params;
+          std::vector<nodes::index_t> arg_indices;
+
+          std::size_t pidx{};
+          for (auto param_node_idx: nodes::get_list_view(m_nodes, call.args_head)) {
+            auto param_type = process_node(param_node_idx, /*emit=*/ false);
+            if (!param_type) return param_type;
+
+            if (pidx >= expected_params.size() || expected_params[pidx].type != *param_type) {
+              return std::unexpected{error::function_call_param_mismatch{
+                .function_name = func->name, .param_idx = pidx
+              }};
+            }
+            arg_indices.emplace_back(param_node_idx);
+            pidx++;
+          }
+
+          if (emit) {
+            for (auto idx: arg_indices) {
+              if (auto ok = process_node(idx, true); !ok) return ok;
+            }
+
+            builder.emit_const<korka::type::i64>(static_cast<int64_t>(arg_indices.size()));
+
+            builder.emit_call(func->start_pos);
+          }
+
+          return func->return_type;
         },
 
         [&](const auto &value) -> result_t {
@@ -484,7 +607,7 @@ struct unique_type{};
     };
 
     if constexpr (not expected()) {
-      report_error<[]{return expected().error();}>();
+      report_error<[] { return expected().error(); }>();
       return expected().error();
     } else {
       return compilation_result_to_const<[] constexpr { return expected().value(); }>();

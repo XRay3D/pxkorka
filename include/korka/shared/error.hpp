@@ -1,9 +1,15 @@
 #pragma once
 
+#include <concepts>
 #include <variant>
 #include "korka/compiler/lex_token.hpp"
 #include "korka/utils/const_format.hpp"
+#include "korka/utils/string.hpp"
 #include <optional>
+
+#if __cplusplus >= 202400L && __cpp_static_assert >= 202306L
+#define KORKA_FEATURE_FORMATTED_STATIC_ASSERT
+#endif
 
 namespace korka {
   namespace error {
@@ -77,7 +83,18 @@ namespace korka {
     };
 
     constexpr auto report(const function_return_type_mismatch &err) -> std::string {
-      return korka::format("Compiler Error: expected ~ type to be returned, got ~", err.return_type, err.actual_type);
+      return korka::format("Compiler Error: expected '~' type to be returned, got '~'", err.return_type,
+                           err.actual_type);
+    }
+
+    struct function_call_param_mismatch {
+      std::string_view function_name;
+      std::size_t param_idx;
+    };
+
+    constexpr auto report(const function_call_param_mismatch &err) -> std::string {
+      return korka::format("Compiler Error: in function call to '~' wrong parameter at ~",
+                           err.function_name, err.param_idx);
     }
 
 
@@ -87,6 +104,15 @@ namespace korka {
 
     constexpr auto report(const other_compiler_error &err) -> std::string {
       return korka::format("Compiler Error: ~", err.message);
+    }
+
+    struct unsupported_math_op {
+      std::string_view type;
+      std::string_view op;
+    };
+
+    constexpr auto report(const unsupported_math_op &err) -> std::string {
+      return korka::format("Error: Unsupported math operation '~' for type '~'", err.op, err.type);
     }
 
     struct other_error {
@@ -105,7 +131,9 @@ namespace korka {
     error::redeclaration,
     error::undefined_symbol,
     error::unknown_type,
+    error::function_call_param_mismatch,
     error::other_compiler_error,
+    error::unsupported_math_op,
     error::other_error>;
 
   constexpr auto to_string(const error_t &err) -> std::string {
@@ -121,12 +149,29 @@ namespace korka {
 
   template<auto err_getter>
   consteval auto report_error() -> void {
-    // Idk, __cpp_static_assert check is not enough for clang
-    #if __cplusplus >= 202400L && __cpp_static_assert >= 202306L
-    static_assert(false, to_string(err_getter()));
-    #else
-    constexpr auto msg = const_string_from_string_view<[]{return to_string(err_getter());}>();
-    std::ignore = ErrorMessage<msg>{};
-    #endif
+    if constexpr (std::convertible_to<decltype(err_getter()), error_t>) {
+      #ifdef KORKA_FEATURE_FORMATTED_STATIC_ASSERT
+      static_assert(false, to_string(err_getter()));
+      #else
+      constexpr auto msg = const_string_from_string_view<[] { return to_string(err_getter()); }>();
+      std::ignore = ErrorMessage<msg>{};
+      #endif
+    } else {
+      #ifdef KORKA_FEATURE_FORMATTED_STATIC_ASSERT
+      static_assert(false, err_getter());
+      #else
+      constexpr auto msg = const_string_from_string_view<err_getter>();
+      std::ignore = ErrorMessage<msg>{};
+      #endif
+    }
+  }
+
+  template<bool ok, auto err_getter>
+  consteval auto format_static_assert() -> void {
+    if constexpr (ok) {
+      // yay
+    } else {
+      report_error<err_getter>();
+    }
   }
 }

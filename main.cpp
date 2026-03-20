@@ -1,32 +1,28 @@
 #include "korka/compiler/parser.hpp"
 #include "korka/compiler/compiler.hpp"
 #include "korka/compiler/ast_walker.hpp"
+#include "korka/vm/vm_runtime.hpp"
 #include <print>
 
 constexpr char code[] = R"(
-int main() {
-  int a = 2;
-  if (a) {
-    return a;
-  } else {
-    return 5 + a;
-  }
-}
+int fib(int n) {
+  if (n == 0) return 0;
+  if (n == 1) return 1;
 
-int foo(int a, int b) {
-  return a + b;
+  return fib(n-1) + fib(n-2);
 }
 )";
 
 constexpr auto compile_result = korka::compile<code>();
 
-auto main_func = compile_result.function<"main">();
-static_assert(std::is_same_v<decltype(main_func), long (*)()>);
-
-auto foo_func = compile_result.function<"foo">();
-static_assert(std::is_same_v<decltype(foo_func), long (*)(long, long)>);
 
 int main() {
+  korka::vm::context ctx{compile_result.bytes};
+//  auto main_func = compile_result.function<"main">();
+  auto fib_func = compile_result.function<"fib">();
+
+  std::println("{}", ctx.call(fib_func, 12L));
+
 //  std::ignore = tokens;
 //  std::println("{:n:02X}", compile_result.bytes | std::views::transform([](auto b) { return static_cast<int>(b); }));
 
