@@ -238,7 +238,9 @@ namespace korka {
     };
 
     // Retrieve the type
-    template<const_string name> requires ([] -> bool {
+    template<const_string name>
+      #ifdef __clang__ // GCC crashes on this check for some reason
+    requires ([] -> bool {
       constexpr bool found = requires {
         { _overloaded(unique_type<hash(name)>{}) };
       };
@@ -249,6 +251,7 @@ namespace korka {
       }
       return true;
     }())
+      #endif
     using get_signature_t = std::remove_pointer_t<decltype(_overloaded(
       unique_type<hash(name)>{}))>;
 
