@@ -21,7 +21,7 @@ program even starts.
 | Bytecode builder |  Done   |     constexpr     |
 |      Parser      |  Done   |     constexpr     |
 |     Compiler     |   Partially done   |     constexpr     |
-|    VM runner     | WIP |      runtime      |
+|    VM runner     | Partially done |      runtime      |
 
 What's done:
 ```cpp
