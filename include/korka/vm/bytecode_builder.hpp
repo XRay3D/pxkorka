@@ -70,6 +70,11 @@ namespace korka::vm {
       emit_op(op_code::call);
       m_data.write_many(address);
     }
+
+    constexpr auto emit_trap(vm_external_function_id function_id) {
+      emit_op(op_code::trap);
+      m_data.write_many(function_id);
+    }
 //
 //    constexpr auto emit_jmp_if(const label &target, reg_id_t cond) {
 //      record_jump(op_code::jmp_if, target, cond);

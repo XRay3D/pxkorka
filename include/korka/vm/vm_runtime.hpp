@@ -7,68 +7,22 @@
 #include "korka/utils/function_traits.hpp"
 #include "korka/vm/op_codes.hpp"
 #include "korka/utils/byte_reader.hpp"
-#include "korka/compiler/compiler.hpp"
+#include "korka/compiler/result.hpp"
+#include "korka/vm/value.hpp"
+#include "korka/compiler/binding.hpp"
+#include "korka/vm/context_base.hpp"
 #include <array>
 #include <bit>
 #include <vector>
 #include <cstdint>
 
 namespace korka::vm {
-  using value = std::array<std::byte, 8>;
-
-  template<class T>
-  constexpr auto box(T const &v) -> value {
-    static_assert(std::is_same_v<T, std::int64_t> or std::is_same_v<T, double>, "T must be int or double");
-
-    return std::bit_cast<value>(v);
-  }
-
-  template<class T>
-  constexpr auto unbox(value const &v) -> T {
-    static_assert(std::is_same_v<T, std::int64_t> or std::is_same_v<T, double>, "T must be int or double");
-
-    return std::bit_cast<T>(v);
-  }
-
-  constexpr auto box_int(std::int64_t i) -> value {
-    return std::bit_cast<value>(i);
-  }
-
-  struct function_scope {
-    // Set on `call`, used on `ret`
-    std::size_t suspension_point{};
-
-    std::vector<value> locals{8};
-
-    auto set_local_value(local_index_t i, value const &v) -> void {
-      locals.at(i) = v;
-    }
-
-    template<class T = value>
-    auto set_local(local_index_t i, T const &value) -> void {
-      set_local_value(i, box<T>(value));
-    }
-
-    auto get_local_value(local_index_t i) -> value {
-      return locals.at(i);
-    }
-
-    template<class T = value>
-    auto get_local(local_index_t i) -> T {
-      return unbox<T>(get_local_value(i));
-    }
-
-
-    auto clear() -> void {
-      locals.clear();
-    }
-  };
-
-  class context {
+  template<bindings_concepts bindings_t = bindings<0, 0>>
+  class context : public context_base {
   public:
-    explicit context(std::span<const std::byte> bytes)
-      : m_reader(bytes) {
-      m_stack.reserve(64);
+    explicit context(std::span<const std::byte> bytes, bindings_t binds = {})
+      : context_base(bytes), m_bindings(binds) {
+
     }
 
     template<class Signature, class ...Args, class Traits = function_traits<Signature>>
@@ -100,35 +54,17 @@ namespace korka::vm {
         }
       }
 
-      return pop<typename Traits::return_type>();
+      using return_type = typename Traits::return_type;
+      if constexpr (std::is_void_v<return_type>) {
+        return;
+      } else {
+        return pop<return_type>();
+      }
     }
 
-    auto push_value(value const &v) -> void {
-      m_stack.emplace_back(v);
-    }
+  protected:
+    bindings_t m_bindings;
 
-    template<class T>
-    auto push(T const &v) -> void {
-      push_value(box<T>(v));
-    }
-
-    auto pop_value() -> value {
-      value v = m_stack.back();
-      m_stack.pop_back();
-      return v;
-    }
-
-    template<class T>
-    auto pop() -> T {
-      return unbox<T>(pop_value());
-    }
-
-    template<korka::type T>
-    auto pop() -> type_to_cpp_t<T> {
-      return unbox<type_to_cpp_t<T>>(pop_value());
-    }
-
-  private:
     auto execute_op() -> op_code {
       auto initial_pc = m_reader.cursor();
 
@@ -218,27 +154,16 @@ namespace korka::vm {
             m_reader.set_cursor(current_scope()->suspension_point);
           }
           break;
+        case op_code::trap: {
+          auto id = m_reader.read<vm_external_function_id>();
+          auto func = m_bindings.get_callable_by_id(id);
+          (*func)(*this);
+        }
+          break;
       }
 
       return code;
     }
-
-    auto current_scope() -> function_scope * {
-      return m_scopes.empty() ? nullptr : std::addressof(m_scopes.back());
-    }
-
-    auto push_scope() -> void {
-      m_scopes.emplace_back();
-    }
-
-    auto pop_scope() -> void {
-      m_scopes.pop_back();
-    }
-
-    std::vector<value> m_stack;
-    std::vector<function_scope> m_scopes;
-
-    byte_reader m_reader;
   };
 
   class runtime {
