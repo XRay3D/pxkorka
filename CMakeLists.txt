@@ -5,7 +5,7 @@ project(pxkorka
 )
 
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -48,6 +48,12 @@ add_library(korka_lib
         include/korka/utils/frozen_hash_string_view.hpp
         include/korka/utils/byte_reader.hpp
         include/korka/utils/function_traits.hpp
+        include/korka/compiler/binding.hpp
+        include/korka/compiler/info.hpp
+        include/korka/vm/value.hpp
+        include/korka/compiler/result.hpp
+        include/korka/compiler/binding_wrapper.hpp
+        include/korka/vm/context_base.hpp
 )
 
 target_include_directories(korka_lib

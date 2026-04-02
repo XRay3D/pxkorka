@@ -60,7 +60,10 @@ namespace korka::vm {
     //            C
     // Then VM on call puts them into locals
     call, // <op><address_t>
-    ret
+    ret,
+
+    // call external function
+    trap, // <op><vm_external_function_id>
   };
 
   template<korka::type Type>
@@ -130,4 +133,16 @@ namespace korka::vm {
 
   template<auto type_info_getter>
   using type_info_to_cpp_t = decltype(_type_info_to_cpp<type_info_getter>());
+
+
+  template<class T>
+  constexpr auto cpp_t_to_type_info() -> type_info {
+    if constexpr (std::is_same_v<T, void>) {
+      return {type::void_};
+    } else if constexpr (std::is_same_v<T, std::int64_t>) {
+      return {type::i64};
+    } else {
+      static_assert(false, "Unsupported type");
+    }
+  }
 }

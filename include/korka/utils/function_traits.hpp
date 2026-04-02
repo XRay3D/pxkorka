@@ -16,9 +16,17 @@ namespace korka {
     using args_tuple = std::tuple<Args...>;
 
     constexpr static std::size_t args_count = sizeof...(Args);
+
+    /**
+     * callback(Args*... = nullptr)
+     */
+    static constexpr auto process_args(auto &&callback) {
+      callback(std::add_pointer_t<Args>{}...);
+    }
   };
 
   template<typename R, typename... Args>
   struct function_traits<R(*)(Args...)> : function_traits<R(Args...)> {
+
   };
 }

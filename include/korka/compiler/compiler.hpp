@@ -1,6 +1,8 @@
 #pragma once
 
 #include <frozen/bits/elsa.h>
+#include "frozen/unordered_map.h"
+#include "korka/compiler/binding.hpp"
 #include "korka/shared/error.hpp"
 #include "korka/shared/flat_map.hpp"
 #include "korka/utils/overloaded.hpp"
@@ -12,294 +14,19 @@
 #include <vector>
 #include <optional>
 #include <string_view>
+#include "info.hpp"
+#include "binding.hpp"
+#include "result.hpp"
 
 namespace korka {
-  struct void_t {
-  };
-
-  using vm::type_info;
-
-  constexpr auto string_to_type(std::string_view name) -> type {
-    if (name == "int") return type::i64;
-    else if (name == "void") return type::void_;
-    // TODO: other types
-    return type::i64;
-  }
-
-  constexpr auto type_to_string(type t) -> std::string_view {
-    switch (t) {
-      case type::void_:
-        return "void";
-      case type::i64:
-        return "int";
-    }
-  }
-
-  struct variable_info {
-    std::string_view name;
-    type_info type;
-
-    std::size_t locals_index;
-
-    static constexpr auto from_node(const nodes::decl_var &node) -> variable_info {
-      return {
-        .name = node.var_name,
-        .type{},
-        .locals_index{}
-      };
-    }
-  };
-
-  struct function_info {
-    std::string_view name;
-    std::vector<variable_info> params;
-    type_info return_type;
-
-    std::size_t start_pos;
-  };
-
-  template<std::size_t NMaxParams>
-  struct const_function_info {
-    std::string_view name;
-    std::size_t param_count;
-    std::array<variable_info, NMaxParams> params;
-    type_info return_type;
-
-    std::size_t start_pos;
-  };
-
-  template<auto info_getter>
-  struct _extract_function_signature {
-    template<typename IndexSequence>
-    struct param_helper;
-
-    template<std::size_t... Is>
-    struct param_helper<std::index_sequence<Is...>> {
-      // Map each parameter info to its corresponding C++ type
-      using type = vm::type_info_to_cpp_t<[] { return info_getter().return_type; }>(
-        vm::type_info_to_cpp_t<[] { return info_getter().params[Is].type; }>...
-      );
-    };
-
-    using type = typename param_helper<
-      std::make_index_sequence<info_getter().param_count>
-    >::type;
-  };
-
-  template<auto info_getter>
-  using const_function_info_to_signature_t = typename _extract_function_signature<info_getter>::type;
-
-  template<std::size_t NMaxParams>
-  constexpr auto function_info_to_const(const function_info &f) {
-    const_function_info<NMaxParams> info{
-      .name = f.name,
-      .param_count = f.params.size(),
-      .params{},
-      .return_type = f.return_type,
-      .start_pos = f.start_pos
-    };
-
-    std::ranges::copy(f.params, std::begin(info.params));
-    return info;
-  }
-
-  struct symbol_table {
-    struct scope {
-      flat_map<std::string_view, variable_info> variables;
-
-      std::size_t current_locals_size{};
-    };
-    std::vector<scope> scopes;
-    flat_map<std::string_view, function_info> functions;
-
-    constexpr auto push_scope() -> void { scopes.emplace_back(); }
-
-    constexpr auto pop_scope() -> void { scopes.pop_back(); }
-
-    constexpr auto declare_var(std::string_view name, const type_info &type) -> std::expected<variable_info, error_t> {
-      if (scopes.empty()) {
-        return std::unexpected{error::other_compiler_error{
-          .message = "No scope"
-        }};
-      }
-
-      auto &current = scopes.back();
-      if (current.variables.contains(name)) {
-        return std::unexpected{error::redeclaration{
-          .identifier = name
-        }};
-      }
-
-      variable_info info{
-        .name = name,
-        .type = type,
-        .locals_index = current.current_locals_size++
-      };
-
-      current.variables[name] = info;
-      return info;
-    }
-
-    constexpr auto declare_function(std::string_view name, auto &&...args) -> std::expected<void, error_t> {
-      functions.emplace(std::piecewise_construct,
-                        std::forward_as_tuple(name),
-                        std::forward_as_tuple(name, std::forward<decltype(args)>(args)...));
-      return {};
-    }
-
-    constexpr auto lookup_variable(std::string_view name) -> std::optional<variable_info> {
-      for (auto &scp: std::ranges::reverse_view(scopes)) {
-        if (auto var_it = scp.variables.find(name); var_it != std::end(scp.variables)) {
-          return var_it->second;
-        }
-      }
-      return std::nullopt;
-    }
-
-    constexpr auto lookup_function(std::string_view name) -> std::optional<function_info> {
-      if (auto func_it = functions.find(name); func_it != std::end(functions)) {
-        return func_it->second;
-      }
-      return std::nullopt;
-    }
-
-    constexpr auto clear() -> void {
-      scopes.clear();
-      functions.clear();
-    }
-  };
-
-
-  struct compilation_result {
-    std::vector<std::byte> bytes;
-    flat_map<std::string_view, function_info> functions;
-  };
-
-
-  struct function_runtime_info {
-    std::size_t start_pos;
-  };
-
-  template<class Signature>
-  struct function_runtime_info_with_signature : public function_runtime_info {
-    using signature_t = Signature;
-
-    using function_runtime_info::start_pos;
-  };
-
-  template<std::size_t NBytes, std::size_t NFunctions, std::size_t NMaxParams, class SignatureMapper>
-  struct const_compilation_result {
-    std::array<std::byte, NBytes> bytes;
-    frozen::unordered_map<std::string_view, const_function_info<NMaxParams>, NFunctions> functions;
-
-    template<const_string name>
-    using get_signature_t = typename SignatureMapper::template get_signature_t<name>;
-
-    template<const_string name>
-    constexpr auto function() const {
-      return function_runtime_info_with_signature<get_signature_t<name>>{
-        functions.at(name).start_pos
-      };
-    }
-
-//    SignatureMapper mapper{};
-  };
-
-  template<auto>
-  struct unique_type {
-  };
-
-  template<auto function_info_getter, typename IndexSequence>
-  struct signature_mapper;
-
-  template<auto function_info_getter, std::size_t... Is>
-  struct signature_mapper<function_info_getter, std::index_sequence<Is...>> {
-    consteval static auto hash(auto &&v) -> std::size_t {
-      return frozen::elsa<std::string_view>{}(v, 0);
-    }
-
-    // That's how we basically map types to strings
-    // Function name -> hash -> unique_type<hash>
-    // And then we create a functor with overloading for different types
-    // Basically it looks like this:
-    //  overloaded{
-    //    [](unique_type<hash("NAME1")>) -> TYPE1* { return nullptr; },
-    //    [](unique_type<hash("NAME2")>) -> TYPE2* { return nullptr; },
-    //    ...
-    //  }
-
-    // I think I could return here some meta info for internal types later, idk
-
-    constexpr static auto _overloaded = overloaded{
-      ([](unique_type<hash(function_info_getter(Is).name)>)
-        -> const_function_info_to_signature_t<[] { return function_info_getter(Is); }> * {
-        return nullptr;
-      })...
-    };
-
-    // Retrieve the type
-    template<const_string name>
-      #ifdef __clang__ // GCC crashes on this check for some reason
-    requires ([] -> bool {
-      constexpr bool found = requires {
-        { _overloaded(unique_type<hash(name)>{}) };
-      };
-      if constexpr (not found) {
-        report_error<[] {
-          return format("Symbol '~' not found", name);
-        }>();
-      }
-      return true;
-    }())
-      #endif
-    using get_signature_t = std::remove_pointer_t<decltype(_overloaded(
-      unique_type<hash(name)>{}))>;
-
-//    std::tuple<const_function_info_to_signature_t<[] { return function_info_getter(Is); }> *...> debug1;
-//    std::tuple<unique_type<frozen::elsa<std::string_view>{}(function_info_getter(Is).name, 0)>...> debug2;
-  };
-
-
-  template<auto r>
-  constexpr auto compilation_result_to_const() {
-    // --- BYTES ---
-    constexpr static auto bytes = to_array<[] { return r().bytes; }>();
-
-    // --- FUNCTIONS ---
-    constexpr static auto function_count = []() constexpr {
-      return r().functions.size();
-    }();
-    constexpr static auto max_params_n = []() constexpr {
-      std::size_t n{};
-      for (auto &&f: r().functions) {
-        n = std::max(n, f.second.params.size());
-      }
-      return n;
-    }();
-    constexpr static auto functions = []() constexpr {
-      std::array<std::pair<std::string_view, const_function_info<max_params_n>>, function_count> functions_data{};
-      std::size_t i{};
-      for (auto &&[key, value]: r().functions) {
-        functions_data[i++] = (std::make_pair(key, function_info_to_const<max_params_n>(value)));
-      }
-      return frozen::make_unordered_map(functions_data);
-    };
-
-    // Function mapper
-    using sign_mapper = signature_mapper<[](std::size_t i) {
-      return (functions().begin() + i)->second;
-    }, std::make_index_sequence<function_count>>;
-
-    return const_compilation_result<bytes.size(), function_count, max_params_n, sign_mapper>{
-      bytes,
-      functions()
-    };
-  }
-
+  template<std::size_t BindingsCount = 0, std::size_t BindingMaxParamCount = 0>
   class compiler {
+    using bindings_container = bindings<BindingsCount, BindingMaxParamCount>;
+
   public:
-    constexpr compiler(std::span<const nodes::node> nodes, nodes::index_t root_node)
-      : m_nodes(nodes), m_root_node(root_node) {}
+    constexpr compiler(std::span<const nodes::node> nodes, nodes::index_t root_node, const bindings_container &bindings)
+      : m_nodes(nodes), m_root_node(root_node), m_bindings(bindings) {
+    }
 
     constexpr auto compile() -> std::expected<compilation_result, error_t> {
       m_symbols.push_scope();
@@ -317,6 +44,9 @@ namespace korka {
     nodes::index_t m_root_node;
     symbol_table m_symbols;
     vm::bytecode_builder builder;
+
+    // External bindings
+    bindings_container m_bindings;
 
     // Info for ast walker
     std::optional<type_info> m_current_func_ret;
@@ -418,20 +148,27 @@ namespace korka {
         },
 
         [&](const nodes::stmt_return &stmt) -> result_t {
-          auto actual_type = process_node(stmt.expr, emit);
-          if (!actual_type) return actual_type;
+          if (stmt.expr != empty_node) {
+            auto actual_type = process_node(stmt.expr, emit);
+            if (!actual_type) return actual_type;
 
-          // Semantic Check: Does return type match function signature?
-          if (m_current_func_ret && *actual_type != *m_current_func_ret) {
-            // TODO: proper error
-            return std::unexpected{error::other_compiler_error{
-              .message = "Function return type mismatch"
-            }};
+            // Semantic Check: Does return type match function signature?
+            if (m_current_func_ret && *actual_type != *m_current_func_ret) {
+              // TODO: proper error
+              return std::unexpected{error::other_compiler_error{
+                .message = "Function return type mismatch"
+              }};
+            }
+            if (emit) {
+              builder.emit_op(vm::op_code::ret);
+            }
+            return *actual_type;
+          } else {
+            if (emit) {
+              builder.emit_op(vm::op_code::ret);
+            }
+            return korka::type_info{korka::type::void_};
           }
-          if (emit) {
-            builder.emit_op(vm::op_code::ret);
-          }
-          return *actual_type;
         },
         [&](const nodes::decl_var &var) -> result_t {
           auto ok = m_symbols.declare_var(var.var_name, string_to_type(var.type_name));
@@ -556,25 +293,49 @@ namespace korka {
         },
         [&](nodes::expr_call const &call) -> result_t {
           auto func = m_symbols.lookup_function(call.name);
-          if (!func) {
+          auto bindings_func = m_bindings.get(call.name);
+
+
+          if (not func and not bindings_func) {
             return std::unexpected{error::undefined_symbol{.identifier = call.name}};
           }
 
-          auto &expected_params = func->params;
           std::vector<nodes::index_t> arg_indices;
 
-          std::size_t pidx{};
-          for (auto param_node_idx: nodes::get_list_view(m_nodes, call.args_head)) {
-            auto param_type = process_node(param_node_idx, /*emit=*/ false);
-            if (!param_type) return param_type;
+          // Internal function
+          if (func) {
+            auto &expected_params = func->params;
 
-            if (pidx >= expected_params.size() || expected_params[pidx].type != *param_type) {
-              return std::unexpected{error::function_call_param_mismatch{
-                .function_name = func->name, .param_idx = pidx
-              }};
+            std::size_t pidx{};
+            for (auto param_node_idx: nodes::get_list_view(m_nodes, call.args_head)) {
+              auto param_type = process_node(param_node_idx, /*emit=*/ false);
+              if (!param_type) return param_type;
+
+              if (pidx >= expected_params.size() || expected_params[pidx].type != *param_type) {
+                return std::unexpected{error::function_call_param_mismatch{
+                  .function_name = call.name, .param_idx = pidx
+                }};
+              }
+              arg_indices.emplace_back(param_node_idx);
+              pidx++;
             }
-            arg_indices.emplace_back(param_node_idx);
-            pidx++;
+          } else { // External function
+            auto &expected_params = bindings_func->param_types;
+
+            std::size_t pidx{};
+            for (auto param_node_idx: nodes::get_list_view(m_nodes, call.args_head)) {
+              auto param_type = process_node(param_node_idx, false);
+              if (not param_type) return param_type;
+
+              if (pidx >= expected_params.size() or expected_params[pidx] != *param_type) {
+                return std::unexpected{error::function_call_param_mismatch{
+                  .function_name = call.name, .param_idx = pidx
+                }};
+              }
+
+              arg_indices.emplace_back(param_node_idx);
+              pidx++;
+            }
           }
 
           if (emit) {
@@ -582,15 +343,26 @@ namespace korka {
               if (auto ok = process_node(idx, true); !ok) return ok;
             }
 
-            builder.emit_const<korka::type::i64>(static_cast<int64_t>(arg_indices.size()));
-
-            builder.emit_call(func->start_pos);
+            if (func) {
+              builder.emit_const<korka::type::i64>(static_cast<int64_t>(arg_indices.size()));
+              builder.emit_call(func->start_pos);
+            } else {
+              builder.emit_trap(bindings_func->id);
+            }
           }
 
-          return func->return_type;
+          if (func) {
+            return func->return_type;
+          } else {
+            return bindings_func->return_type;
+          }
+        },
+        [&](const stmt_expr &expr) -> result_t {
+          return process_node(expr.expr, emit);
         },
 
         [&](const auto &value) -> result_t {
+          throw 0;
           std::ignore = value;
           return std::unexpected{error::other_compiler_error{
             "Not implemented"
@@ -600,11 +372,10 @@ namespace korka {
     }
   };
 
-  template<auto &&nodes, nodes::index_t root>
+  template<auto &&nodes, nodes::index_t root, auto bindings>
   consteval static auto compile_nodes() {
-    constexpr static auto expected = [] constexpr {
-      return compiler{nodes, root}.compile();
-    };
+
+    constexpr static auto expected = [] { return compiler{nodes, root, *bindings}.compile(); };
 
     if constexpr (not expected()) {
       report_error<[] { return expected().error(); }>();
@@ -614,10 +385,10 @@ namespace korka {
     }
   }
 
-  template<const_string code>
+  template<const_string code, auto bindings>
   consteval static auto compile() {
     constexpr static auto nodes_root = parse<code>();
 
-    return compile_nodes<nodes_root.first, nodes_root.second>();
+    return compile_nodes<nodes_root.first, nodes_root.second, bindings>();
   }
 } // namespace korka
