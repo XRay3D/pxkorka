@@ -1,3 +1,5 @@
 cmake-build-*
 
 .idea
+.qtcreator
+3party
